@@ -1,3 +1,5 @@
+import json
+from bson import json_util
 from flask import Blueprint, request, make_response, Response
 
 
@@ -10,6 +12,12 @@ def register_activitypub_blueprint(app, mongo):
     @activitypub_bp.route("/.well-known/webfinger", methods=["GET"])
     def webfinger():
         resource = request.args.get("resource")
+
+        if not resource:
+            return make_response({
+                "error": "Resource not found"
+            }, 404)
+
         account = split_resource(resource)
 
         user = mongo.db.users.find_one({"username": account})
@@ -30,7 +38,7 @@ def register_activitypub_blueprint(app, mongo):
             ]
         }, 200)
 
-        response.headers['Content-Type'] = 'application/jrd+json'
+        response.headers['Content-Type'] = 'application/activity+json'
 
         return response
 
@@ -38,37 +46,49 @@ def register_activitypub_blueprint(app, mongo):
     def actor(username):
         user = mongo.db.users.find_one({"username": username})
 
-        if user is None:
-            return make_response({
-                "error": "User not found"
-            }, 404)
+        if not user:
+            return {"error": "User not found"}, 404
 
         user_name = user.get("username")
         public_key = user.get("public_key")
+        base_url = f"{request.url_root}users/{user_name}"
 
-        response = make_response({
+        response = {
             "@context": "https://www.w3.org/ns/activitystreams",
             "type": "Person",
-            "id": f"http://127.0.0.1:5000/users/{user_name}",
-            "name": f"{user_name}",
-            "preferredUsername": f"{user_name}",
+            "id": base_url,
+            "name": user_name,
+            "preferredUsername": user_name,
             "summary": "A test account for testing tests",
-            "inbox": f"http://127.0.0.1:5000/users/{user_name}/inbox",
-            "outbox": f"http://127.0.0.1:5000/users/{user_name}/outbox",
+            "inbox": f"{base_url}/inbox",
+            "outbox": f"{base_url}/outbox",
             "publicKey": {
-                "id": f"http://127.0.0.1:5000/users/{user_name}#main-key",
-                "owner": f"http://127.0.0.1:5000/users/{user_name}",
+                "id": f"{base_url}#main-key",
+                "owner": base_url,
                 "publicKeyPem": public_key
             }
+        }
+
+        return response, 200, {'Content-Type': 'application/activity+json'}
+
+    @activitypub_bp.route('/users/<username>/outbox', methods=['GET'])
+    def inbox(username):
+
+        activities = mongo.db.activities.find({
+            "to": {
+                "$in": [
+                    f"http://localhost:5000/users/{username}/"
+                ]
+            }
         })
+
+        activities = json.loads(json_util.dumps(activities))
+
+        response = make_response(activities, 200)
 
         response.headers['Content-Type'] = 'application/activity+json'
 
         return response
-
-    @activitypub_bp.route('/users/<username>/outbox', methods=['GET'])
-    def inbox(username):
-        return mongo.db.activities.find({"to": "username"})
 
     @activitypub_bp.route('/users/<username>/inbox', methods=['POST'])
     def outbox(username):

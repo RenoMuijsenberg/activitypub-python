@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from flask import Flask
 from flask_pymongo import PyMongo
 
+
 load_dotenv()
 
 # Configure app (database, secret key, etc.)
