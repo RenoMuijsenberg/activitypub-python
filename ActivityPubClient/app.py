@@ -23,7 +23,7 @@ login_data = {
     "password": "Test123"
 }
 
-login_response = requests.post("http://localhost:5000/api/login", json=login_data)
+login_response = requests.post("http://127.0.0.1:5000/api/login", json=login_data)
 
 if login_response.status_code != 200:
     print("Failed to login")
@@ -34,7 +34,7 @@ print(f"Successfully logged in: {logged_in_user}")
 
 # Now we need to get the inbox and stuff of the logged-in user, maybe I should add this data to then user table in the db.
 
-user_response = requests.get(f"http://localhost:5000/users/{logged_in_user['username']}")
+user_response = requests.get(f"http://127.0.0.1:5000/users/{logged_in_user['username']}")
 
 if user_response.status_code != 200:
     print("Failed to login")
@@ -52,7 +52,8 @@ webfinger_request_url = f"http://127.0.0.1:5000/.well-known/webfinger?resource={
 webfinger_response = requests.get(webfinger_request_url)
 
 if webfinger_response.status_code != 200:
-    print("Failed to get the webfinger resource")
+    exit("Failed to get the webfinger resource")
+
 
 webfinger_data = webfinger_response.json()
 print(f"Successfully retrieved webfinger data: {webfinger_data}")
@@ -61,7 +62,7 @@ print(f"Successfully retrieved webfinger data: {webfinger_data}")
 karin_profile = requests.get(webfinger_data["links"][0]["href"])
 
 if karin_profile.status_code != 200:
-    print("Failed to get the profile")
+    exit("Failed to get the profile")
 
 karin_profile_data = karin_profile.json()
 print(f"Successfully retrieved Karin's profile data: {karin_profile_data}")
@@ -72,19 +73,27 @@ karin_inbox = karin_profile_data["inbox"]
 # The attributedTo should be the user that sends the message, in this case, Test123
 # The to should be the user that receives the message, in this case, Karin
 # The type should be the type of the message, in this case, Note
-# We only will send an object, this is not an activity, just a simple message
-# The server should recognise it and create a new activity from it (Create)
 
 message = {
-    "attributedTo": user_data["id"],
-    "to": karin_profile_data["id"],
-    "type": "Note",
-    "content": "Hello Karin, this is a message from Test123"
+    "@context": "https://www.w3.org/ns/activitystreams",
+    "type": "Create",
+    "to": [
+        karin_profile_data["id"]
+    ],
+    "actor": user_data["id"],
+    "object": {
+        "attributedTo": user_data["id"],
+        "to": [
+            karin_profile_data["id"]
+        ],
+        "type": "Note",
+        "content": "Hello Karin, this is a message from Test123"
+    }
 }
 
-send_message = requests.post(user_data["outbox"], json=message)
+send_message = requests.post(user_data["outbox"], json=message, headers={"Content-Type": "application/ld+json; profile='https://www.w3.org/ns/activitystreams'"})
 
-if send_message.status_code != 200:
-    print("Failed to send the message")
+if send_message.status_code != 201:
+    exit("Failed to send the message")
 
 print("Successfully sent the message")

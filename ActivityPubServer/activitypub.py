@@ -88,44 +88,69 @@ def register_activitypub_blueprint(app, mongo):
 
     @activitypub_bp.route('/users/<username>/outbox', methods=['GET', 'POST'])
     def outbox(username):
-        # If posted to outbox im posting to my own outbox
-        if request.method == 'POST':
-            data = request.json
-            post_to_own_outbox(data)
-        else:
-            get_from_own_outbox(username)
+        if request.method == 'GET':
+            return get_activities(username)
+        elif request.method == 'POST':
+            return post_activity(request)
 
-    def post_to_own_outbox(data):
-        activity_type = data.get("type")
+    def get_activities(username):
+        try:
+            messages = list(mongo.db.activities.find({"actor": f"{request.url_root}users/{username}"}, {'_id': False}))
 
-        if activity_type is not "Create":
-            create_activity(data)
-
-    def get_from_own_outbox(username):
-        activities = mongo.db.activities.find({
-            "to": {
-                "$in": [
-                    f"http://localhost:5000/users/{username}/"
-                ]
+            user_outbox = {
+                "@context": "https://www.w3.org/ns/activitystreams",
+                "id": f"{request.base_url}",
+                "type": "OrderedCollection",
+                "totalItems": len(messages),
+                "orderedItems": messages
             }
-        })
 
-        activities = json.loads(json_util.dumps(activities))
+            response = make_response(user_outbox, 200)
+            response.headers['Content-Type'] = 'application/activity+json'
+            return response
+        except Exception as e:
+            print(f"Error retrieving activities for user {username}: {e}")
+            return make_response({"error": "Internal server error"}, 500)
 
-        response = make_response(activities, 200)
+    def post_activity(post_request):
+        if post_request.headers.get("Content-Type") != "application/ld+json; profile='https://www.w3.org/ns/activitystreams'":
+            return make_response({"error": "Invalid content type"}, 400)
 
-        response.headers['Content-Type'] = 'application/activity+json'
+        try:
+            data = post_request.json
+            if data is None or not isinstance(data, dict):
+                return make_response({"error": "Invalid request body"}, 400)
 
-        return response
+            bto = data.get("bto")
+            if bto is not None:
+                del data["bto"]
+
+            bcc = data.get("bcc")
+            if bcc is not None:
+                del data["bcc"]
+
+            if data.get("object") is None:
+                data = {
+                    "@context": "https://www.w3.org/ns/activitystreams",
+                    "type": "Create",
+                    "actor": data.get("attributedTo"),
+                    "object": data
+                }
+
+            data["id"] = f"{data.get('actor')}/posts/{uuid.uuid4()}"
+            data["object"]["id"] = f"{data.get('actor')}/posts/{uuid.uuid4()}"
+
+            mongo.db.activities.insert_one(data)
+            return make_response("Ok", 201)
+        except Exception as e:
+            print(f"Error creating activity: {e}")
+            return make_response({"error": "Internal server error"}, 500)
 
     @activitypub_bp.route('/users/<username>/inbox', methods=['POST'])
     def inbox(username):
         data = request.json
 
         activity_type = data.get("type")
-
-        if activity_type is not "Create":
-            create_activity(data)
 
         # if activity_type == "Create":
         #     print("test")
@@ -137,27 +162,5 @@ def register_activitypub_blueprint(app, mongo):
         #     }).inserted_id
 
         return Response(status=201)
-
-    def create_activity(data):
-        attributed_to = data.get("attributedTo")  # The user that sends the message
-        to = data.get("to")  # Array of users that receives the message
-        object_type = data.get("type")
-
-        new_message = {
-            "@context": "https://www.w3.org/ns/activitystreams",
-            "type": "Create",
-            "id": f"{attributed_to}/posts/{uuid.uuid4()}",
-            "to": to,
-            "actor": attributed_to,
-            "object": {
-                "type": object_type,
-                "id": f"{attributed_to}/posts/{uuid.uuid4()}",
-                "attributedTo": attributed_to,
-                "to": to,
-                "content": data.get("content")
-            }
-        }
-
-        print(new_message)
 
     app.register_blueprint(activitypub_bp)
