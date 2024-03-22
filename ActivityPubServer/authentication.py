@@ -1,6 +1,7 @@
 from base64 import b64encode
 
 import rsa
+from bson import json_util
 from cryptography.hazmat.primitives.ciphers.algorithms import AES
 from flask import request, jsonify, Blueprint
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -50,6 +51,6 @@ def register_auth_blueprint(app, mongo):
         if not user or not check_password_hash(user["password"], password):
             return jsonify({"message": "Incorrect username or password"}), 401
 
-        return jsonify({"message": "Login successful"}), 200
+        return json_util.dumps(user), 200
 
     app.register_blueprint(auth_bp)
